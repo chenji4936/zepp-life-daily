@@ -1,0 +1,2 @@
+# Verified with this Requests release during offline client tests.
+requests==2.33.0
