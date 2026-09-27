@@ -1,0 +1,80 @@
+name: Zepp Daily (opt-in)
+
+on:
+  # UTC+8: 12:07, 16:07, 20:07, 23:07. GitHub may delay or drop runs.
+  # Multiple triggers are safe only because a daily artifact is reserved BEFORE login/upload.
+  schedule:
+    - cron: '7 4,8,12,15 * * *'
+  # Deliberately dry-run only: no manual real-write bypass of the daily marker.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+# Serializes scheduled/manual runs; re-runs are independently rejected by Python.
+concurrency:
+  group: zepp-daily-reservation
+  cancel-in-progress: false
+
+jobs:
+  reserve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_run: ${{ steps.guard.outputs.should_run }}
+      date: ${{ steps.guard.outputs.date }}
+      target: ${{ steps.guard.outputs.target }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Check UTC+8 window, prior artifact, and reserve today's target
+        id: guard
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_ARTIFACT_TOKEN: ${{ github.token }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: python github_daily.py reserve
+      # If this upload fails, the Zepp job does not run. No secrets in this job.
+      - name: Persist today's no-retry reservation BEFORE any Zepp write
+        if: steps.guard.outputs.should_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: zepp-daily-reserved-${{ steps.guard.outputs.date }}
+          path: ${{ runner.temp }}/zepp-daily-reservation.json
+          if-no-files-found: error
+          retention-days: 7
+
+  upload:
+    needs: reserve
+    if: needs.reserve.outputs.should_run == 'true' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install fixed Python dependency
+        run: python -m pip install -r requirements.txt
+      - name: Upload once at most, then read Zepp cloud summary
+        env:
+          DAILY_DATE: ${{ needs.reserve.outputs.date }}
+          DAILY_TARGET: ${{ needs.reserve.outputs.target }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          ZEPP_ACCOUNT: ${{ secrets.ZEPP_ACCOUNT }}
+          ZEPP_PASSWORD: ${{ secrets.ZEPP_PASSWORD }}
+          GH_ARTIFACT_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: python github_daily.py upload
