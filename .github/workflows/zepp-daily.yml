@@ -1,10 +1,11 @@
 name: Zepp Daily (opt-in)
 
 on:
-  # UTC+8: 12:07, 16:07, 20:07, 23:07. GitHub may delay or drop runs.
+  # UTC+8: hourly from 12:07 through 23:07. GitHub may delay/drop runs;
+  # the script refuses any actual execution outside 12:00-23:59 UTC+8.
   # Multiple triggers are safe only because a daily artifact is reserved BEFORE login/upload.
   schedule:
-    - cron: '7 4,8,12,15 * * *'
+    - cron: '7 4-15 * * *'
   # Deliberately dry-run only: no manual real-write bypass of the daily marker.
   workflow_dispatch:
 
@@ -19,17 +20,17 @@ concurrency:
 
 jobs:
   reserve:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       should_run: ${{ steps.guard.outputs.should_run }}
       date: ${{ steps.guard.outputs.date }}
       target: ${{ steps.guard.outputs.target }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Check UTC+8 window, prior artifact, and reserve today's target
@@ -43,7 +44,7 @@ jobs:
       # If this upload fails, the Zepp job does not run. No secrets in this job.
       - name: Persist today's no-retry reservation BEFORE any Zepp write
         if: steps.guard.outputs.should_run == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: zepp-daily-reserved-${{ steps.guard.outputs.date }}
           path: ${{ runner.temp }}/zepp-daily-reservation.json
@@ -53,16 +54,16 @@ jobs:
   upload:
     needs: reserve
     if: needs.reserve.outputs.should_run == 'true' && github.run_attempt == 1
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 6
     permissions:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Install fixed Python dependency
